@@ -1,0 +1,163 @@
+from pyb import Pin, ADC, Servo
+from machine import SoftI2C
+from motor import Motor
+from time import sleep
+from encoder import Encoder
+import ultrasonic
+from APDS9960LITE import APDS9960LITE
+
+def clicksneeded(angle):
+    from math import pi
+    wheeldiameter = 65
+    """diameter in mm"""
+    wheelbase = 140
+    """wheel base in mm"""
+    angelturn = angle * pi/180
+    """defines the angle we want to turn"""
+    turningradius = wheelbase / 2
+    cee = wheeldiameter * pi
+    length = angelturn * turningradius
+    total = (length/cee)*20
+    return round(total)
+
+
+
+i2c = SoftI2C(scl=Pin("PB13"), sda=Pin("PB14"))
+
+apds9960 = APDS9960LITE(i2c)    # Create APDS9960 sensor object
+apds9960.prox.enableSensor()    # Send I2C command to enable sensor
+
+
+my_servo1 = Servo(1)
+motor_right = Motor("left", "D6", "D7", "D4")
+motor_left = Motor("right", "D8", "D9", "D5")
+IR_SensorL = ADC(Pin('A3'))
+IR_SensorR = ADC(Pin('A2'))
+ENC_L = "D2"
+ENC_R = "D3"
+enc = Encoder(ENC_L, ENC_R)
+TRIG = "D11"
+ECHO = "D10"
+ultrasonic_sensor = ultrasonic.HCSR04(TRIG, ECHO)
+LPWM = 75
+RPWM = 78
+
+""" IR sensors outer as digital input"""
+IR_SensorLL = ADC(Pin("A1"))    # LH outer
+IR_SensorRR = ADC(Pin("A4"))    # RH outer
+LReading = 0
+RReading = 0
+SeeingExit = 0
+
+while True:
+
+    dist = ultrasonic_sensor.distance_mm()
+    motor_left.set_forwards()
+    motor_right.set_forwards()
+    motor_left.duty(LPWM)
+    motor_right.duty(RPWM)
+    """ Sets both motors forward """
+
+    """ IR sensors outer as digital input"""
+    IR_LL = IR_SensorLL.read()
+    IR_RR = IR_SensorRR.read()
+    IR_L = IR_SensorL.read()
+    IR_R = IR_SensorR.read()
+    # print(AverageL, AverageR)
+    """ flip sensor to read 1(one) when line detected"""
+    if IR_R > IR_L+50:
+        my_servo1.angle(0)
+        RPWM = 70
+        LPWM = 10
+        dist = ultrasonic_sensor.distance_mm()
+        if 130 < dist < 150:
+            motor_left.duty(0)
+            motor_right.duty(0)
+            enc.clear_count()
+            a = 0
+            b = 0
+            clicks = 2*clicksneeded(120)
+            while a+b < clicks:
+                motor_left.set_backwards()
+                motor_right.set_forwards()
+                motor_left.duty(66)
+                motor_right.duty(68)
+                a += enc.get_left()
+                b += enc.get_right()
+    elif IR_L > IR_R + 50:
+        my_servo1.angle(0)
+        RPWM = 10
+        LPWM = 70
+        dist = ultrasonic_sensor.distance_mm()
+        if 130 < dist < 150:
+            motor_left.duty(0)
+            motor_right.duty(0)
+            enc.clear_count()
+            a = enc.get_left()
+            b = enc.get_right()
+            clicks = 2*clicksneeded(120)
+            while a+b < clicks:
+                motor_left.set_backwards()
+                motor_right.set_forwards()
+                motor_left.duty(66)
+                motor_right.duty(68)
+                a += enc.get_left()
+                b += enc.get_right()
+    elif IR_L+50>IR_R and IR_R+50>IR_L:
+        dist = ultrasonic_sensor.distance_mm()
+        if 130 < dist < 150:
+            motor_left.duty(0)
+            motor_right.duty(0)
+            enc.clear_count()
+            a = enc.get_left()
+            b = enc.get_right()
+            clicks = 2 * clicksneeded(120)
+            while a + b < clicks:
+                motor_left.set_backwards()
+                motor_right.set_forwards()
+                motor_left.duty(66)
+                motor_right.duty(68)
+                a += enc.get_left()
+                b += enc.get_right()
+    elif IR_LL > IR_RR+50:
+        my_servo1.angle(0)
+        LPWM = 75
+        RPWM = 65
+        while
+    elif IR_RR > IR_LL+50:
+        my_servo1.angle(0)
+        LPWM = 65
+        RPWM = 75
+    else:
+        my_servo1.angle(90)
+        dist = ultrasonic_sensor.distance_mm()
+        RGB = apds9960.prox.proximityLevel
+        while 50 < dist < 200:  # todo calibrate to IR range
+            if dist > 120:
+                # clicksneeded(90-desired_angle)      # todo calibrate to sweep direction
+                LPWM = 65
+                RPWM = 75
+                motor_left.duty(LPWM)
+                motor_right.duty(RPWM)
+                dist = ultrasonic_sensor.distance_mm()
+                RGB = apds9960.prox.proximityLevel
+                while RGB >= 4:
+                    motor_left.duty(0)
+                    motor_right.duty(0)
+            elif dist < 100:
+                LPWM = 75
+                RPWM = 65
+                motor_left.duty(LPWM)
+                motor_right.duty(RPWM)
+                dist = ultrasonic_sensor.distance_mm()
+                RGB = apds9960.prox.proximityLevel
+                while RGB >= 4:
+                    motor_left.duty(0)
+                    motor_right.duty(0)
+        if RGB >= 4:
+            while RGB >= 4:
+                motor_left.duty(0)
+                motor_right.duty(0)
+                RGB = apds9960.prox.proximityLevel
+
+ 
