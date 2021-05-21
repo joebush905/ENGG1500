@@ -1,0 +1,714 @@
+from pyb import Pin, ADC, Servo
+from machine import SoftI2C
+from motor import Motor
+from time import sleep
+from encoder import Encoder
+import ultrasonic
+from APDS9960LITE import APDS9960LITE
+
+i2c = SoftI2C(scl=Pin("PB13"), sda=Pin("PB14"))
+apds9960 = APDS9960LITE(i2c)    # Create APDS9960 sensor object
+apds9960.prox.enableSensor()    # Send I2C command to enable sensor
+RGB = apds9960.prox.proximityLevel
+my_servo1 = Servo(1)
+motor_right = Motor("left", "D6", "D7", "D4")
+motor_left = Motor("right", "D8", "D9", "D5")
+motor_left.set_forwards()
+motor_left.set_forwards()
+IR_SensorL = ADC(Pin('A3'))
+IR_SensorR = ADC(Pin('A2'))
+ENC_L = "D2"
+ENC_R = "D3"
+enc = Encoder(ENC_L, ENC_R)
+TRIG = "D11"
+ECHO = "D10"
+ultrasonic_sensor = ultrasonic.HCSR04(TRIG, ECHO)
+LPWM = 65
+RPWM = 68
+
+""" IR sensors outer as digital input"""
+IR_SensorLL = ADC(Pin("A1"))    # LH outer
+IR_SensorRR = ADC(Pin("A4"))    # RH outer
+IR_LL = IR_SensorLL.read()
+IR_RR = IR_SensorRR.read()
+IR_L = IR_SensorL.read()
+IR_R = IR_SensorR.read()
+a = 0
+b = 0
+c = 0
+d = 0
+STATE = 'Exit Garage'
+while True:
+    while STATE == 'Exit Garage':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        L = enc.get_left() - a
+        R = enc.get_left() - b
+        a = enc.get_right()
+        b = enc.get_right()
+        if L <= R:
+            LPWM = 66
+            RPWM = 68
+        if R < L:
+            LPWM = 65
+            RPWM = 69
+        if IR_LL > IR_LL + 200:
+            STATE = 'Join Line'
+    while STATE == 'Join Line':
+        my_servo1.angle(90)
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        if IR_R > IR_L+200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R+200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 35
+            LPWM = 72
+        elif IR_LL > IR_RR + 150:
+            motor_left.set_backwards()
+            motor_right.set_forwards()
+            LPWM = 65
+            RPWM = 70
+        else:
+            my_servo1.angle(90)
+            dist = ultrasonic_sensor.distance_mm()
+            if 10 < dist < 300:
+                STATE = 'Hallway 1'
+    while STATE == 'Hallway 1':
+        my_servo1.angle(90)
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        my_servo1.angle(90)
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        dist = ultrasonic_sensor.distance_mm()
+        RGB = apds9960.prox.proximityLevel
+        while 0 < dist < 300:  # todo calibrate to IR range
+            dist = ultrasonic_sensor.distance_mm()
+            if dist > 100:
+                # clicksneeded(90-desired_angle)      # todo calibrate to sweep direction
+                LPWM = 50
+                RPWM = 68
+                motor_left.duty(LPWM)
+                motor_right.duty(RPWM)
+                RGB = apds9960.prox.proximityLevel
+                while RGB >= 4:
+                    motor_left.duty(0)
+                    motor_right.duty(0)
+            elif 0 < dist < 90:
+                LPWM = 68
+                RPWM = 50
+                motor_left.duty(LPWM)
+                motor_right.duty(RPWM)
+                dist = ultrasonic_sensor.distance_mm()
+                RGB = apds9960.prox.proximityLevel
+            while RGB >= 4:
+                RGB = apds9960.prox.proximityLevel
+                if RGB >= 4:
+                    motor_left.set_backwards()
+                    motor_right.set_backwards()
+                else:
+                    motor_left.set_forwards()
+                    motor_right.set_forwards()
+            if IR_L > IR_R + 200 or IR_R > IR_L + 200:
+                STATE = 'Roundabout 1'
+            if IR_RR > IR_LL + 200 or IR_LL > IR_RR +200:
+                STATE = 'Roundabout 1'
+    while STATE == 'Roundabout 1':
+        my_servo1.angle(90)
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 35
+            LPWM = 72
+        if IR_LL > IR_RR+150:
+            motor_right.duty(68)
+            motor_left.duty(68)
+            sleep(0.5)
+            STATE = 'Exit Roundabout 1'
+    while STATE == 'Exit Roundabout 1':
+        dist = ultrasonic_sensor.distance_mm()
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_left.set_forwards()
+        motor_right.set_forwards()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        if IR_R > IR_L + 200:
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            RPWM = 35
+            LPWM = 72
+        elif IR_LL > IR_RR + 150:
+            RPWM = 70
+            LPWM = 35
+        elif IR_RR > IR_LL+150:
+            RPWM = 35
+            LPWM = 70
+        else:
+            RPWM = 68
+            LPWM = 68
+        if 10 < dist < 180:
+            STATE = 'Hallway 2'
+    while STATE == 'Hallway 2':
+        my_servo1.angle(90)
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        my_servo1.angle(90)
+        dist = ultrasonic_sensor.distance_mm()
+        RGB = apds9960.prox.proximityLevel
+        if dist > 100:
+            LPWM = 50
+            RPWM = 68
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            RGB = apds9960.prox.proximityLevel
+            while RGB >= 4:
+                motor_left.duty(0)
+                motor_right.duty(0)
+        elif 0 < dist < 90:
+            LPWM = 68
+            RPWM = 50
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            dist = ultrasonic_sensor.distance_mm()
+            RGB = apds9960.prox.proximityLevel
+        elif IR_L > IR_R + 200 or IR_R > IR_L + 200:
+            STATE = 'Line Following 1'
+        elif IR_LL > IR_RR + 200 or IR_RR > IR_LL + 200:
+            STATE = 'Line Following 1'
+        else:
+            STATE = 'Hallway 3'
+        while RGB >= 4:
+            RGB = apds9960.prox.proximityLevel
+            if RGB >= 4:
+                motor_left.set_backwards()
+                motor_right.set_backwards()
+            else:
+                motor_left.set_forwards()
+                motor_right.set_forwards()
+    while STATE == 'Line Following 1':
+        my_servo1.angle(90)
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 35
+            LPWM = 72
+        elif IR_LL > IR_RR + 150:
+            motor_left.set_backwards()
+            motor_right.set_forwards()
+            LPWM = 65
+            RPWM = 70
+        else:
+            my_servo1.angle(90)
+            dist = ultrasonic_sensor.distance_mm()
+            if 10 < dist < 300:
+                STATE = 'Hallway 3'
+    while STATE == 'Hallway 3':
+        my_servo1.angle(90)
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        my_servo1.angle(90)
+        dist = ultrasonic_sensor.distance_mm()
+        RGB = apds9960.prox.proximityLevel
+        if dist > 100:
+            # clicksneeded(90-desired_angle)      # todo calibrate to sweep direction
+            LPWM = 50
+            RPWM = 68
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            RGB = apds9960.prox.proximityLevel
+            while RGB >= 4:
+                motor_left.duty(0)
+                motor_right.duty(0)
+        elif 0 < dist < 90:
+            LPWM = 68
+            RPWM = 50
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            dist = ultrasonic_sensor.distance_mm()
+            RGB = apds9960.prox.proximityLevel
+        elif IR_L > IR_R + 200 or IR_R > IR_L + 200:
+            STATE = 'Line Following 2'
+        elif IR_LL > IR_RR + 200 or IR_RR > IR_LL + 200:
+            STATE = 'Line Following 2'
+        else:
+            STATE = 'Hallway 4'
+        while RGB >= 4:
+            RGB = apds9960.prox.proximityLevel
+            if RGB >= 4:
+                motor_left.set_backwards()
+                motor_right.set_backwards()
+            else:
+                motor_left.set_forwards()
+                motor_right.set_forwards()
+    while STATE == 'Line Following 2':
+        my_servo1.angle(90)
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            my_servo1.angle(0)
+            RPWM = 35
+            LPWM = 72
+        elif IR_LL > IR_RR + 150:
+            motor_left.set_backwards()
+            motor_right.set_forwards()
+            LPWM = 65
+            RPWM = 70
+        else:
+            my_servo1.angle(90)
+            dist = ultrasonic_sensor.distance_mm()
+            if 10 < dist < 300:
+                STATE = 'Hallway 4'
+    while STATE == 'Hallway 4':
+        my_servo1.angle(90)
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        my_servo1.angle(90)
+        dist = ultrasonic_sensor.distance_mm()
+        RGB = apds9960.prox.proximityLevel
+        if dist > 100:
+            # clicksneeded(90-desired_angle)      # todo calibrate to sweep direction
+            LPWM = 50
+            RPWM = 68
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            RGB = apds9960.prox.proximityLevel
+            while RGB >= 4:
+                motor_left.duty(0)
+                motor_right.duty(0)
+        elif 0 < dist < 90:
+            LPWM = 68
+            RPWM = 50
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            dist = ultrasonic_sensor.distance_mm()
+            RGB = apds9960.prox.proximityLevel
+        while RGB >= 4:
+            RGB = apds9960.prox.proximityLevel
+            if RGB >= 4:
+                motor_left.set_backwards()
+                motor_right.set_backwards()
+            else:
+                motor_left.set_forwards()
+                motor_right.set_forwards()
+        if IR_LL > IR_RR + 200:
+            STATE = 'Roundabout 2'
+        if IR_RR > IR_LL + 200:
+            STATE = 'Roundabout 2'
+        if IR_R > IR_L+200:
+            STATE = 'Roundabout 2'
+        if IR_L > IR_R+200:
+            STATE = 'Roundabout 2'
+    while STATE == 'Roundabout 2':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        dist = ultrasonic_sensor.distance_mm()
+        my_servo1.angle(0)
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 35
+            LPWM = 72
+        elif IR_LL > IR_RR + 150:
+            motor_left.set_backwards()
+            motor_right.set_forwards()
+            LPWM = 65
+            RPWM = 70
+        if 0 < dist < 150:
+            motor_right.duty(0)
+            motor_left.duty(0)
+            enc.clear_count()
+            STATE = 'Dead End'
+    while STATE == 'Dead End':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_left.set_backwards()
+        motor_right.set_forwards()
+        motor_right.duty(65)
+        motor_left.duty(65)
+        L = enc.get_left()
+        R = enc.get_right()
+        if L >= 11:
+            motor_left.duty(0)
+        if R >= 11:
+            motor_right.duty(0)
+        if L >= 11 and R >= 11:
+            STATE = 'Fork'
+    while STATE == 'Fork':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        dist = ultrasonic_sensor.distance_mm()
+        my_servo1.angle(0)
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 35
+            LPWM = 72
+        if IR_LL > IR_RR+150:
+            STATE = 'Roundabout 3'
+    while STATE == 'Roundabout 3':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 35
+            LPWM = 72
+        elif IR_LL > IR_RR + 150:
+            motor_left.set_backwards()
+            motor_right.set_forwards()
+            LPWM = 65
+            RPWM = 70
+        elif IR_RR > IR_LL + 100:
+            motor_right.set_forwards()
+            motor_left.set_forwards()
+            LPWM = 75
+            RPWM = 55
+        else:
+            my_servo1.angle(90)
+            dist = ultrasonic_sensor.distance_mm()
+            if 10 < dist < 300:
+                STATE = 'ConDiv 1'
+    while STATE == 'ConDiv':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        my_servo1.angle(90)
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        my_servo1.angle(90)
+        dist = ultrasonic_sensor.distance_mm()
+        RGB = apds9960.prox.proximityLevel
+        if dist > 100:
+            LPWM = 50
+            RPWM = 68
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            while RGB >= 4:
+                motor_left.duty(0)
+                motor_right.duty(0)
+        elif 0 < dist < 90:
+            LPWM = 68
+            RPWM = 50
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            dist = ultrasonic_sensor.distance_mm()
+        while RGB >= 4:
+            RGB = apds9960.prox.proximityLevel
+            if RGB >= 4:
+                motor_left.set_backwards()
+                motor_right.set_backwards()
+            else:
+                motor_left.set_forwards()
+                motor_right.set_forwards()
+        if IR_LL > IR_RR+200 and IR_R > IR_L+200:
+            STATE = 'Fork 2'
+        if IR_LL > IR_RR+200 and IR_L > IR_R+200:
+            STATE = 'Fork 2'
+        if IR_RR > IR_LL+200 and IR_R > IR_L+200:
+            STATE = 'Fork 2'
+        if IR_RR > IR_LL+200 and IR_L > IR_R+200:
+            STATE = 'Fork 2'
+    while STATE == 'Fork 2':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 35
+            LPWM = 72
+        elif IR_LL > IR_RR + 150:
+            motor_left.set_backwards()
+            motor_right.set_forwards()
+            LPWM = 65
+            RPWM = 70
+        if IR_RR > IR_LL + 100:
+            STATE = 'Bottom Line'
+    while STATE == 'Bottom Line':
+        ''' This should bring us back to roundabout 1'''
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 35
+            LPWM = 72
+        elif IR_RR > IR_LL+150:
+            motor_left.set_forwards()
+            motor_right.set_backwards()
+            LPWM = 65
+            RPWM = 65
+        else:
+            my_servo1.angle(90)
+            dist = ultrasonic_sensor.distance_mm()
+            if 10 < dist < 300:
+                STATE = 'Return Hallway'
+    while STATE == 'Return Hallway':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        my_servo1.angle(90)
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        my_servo1.angle(90)
+        dist = ultrasonic_sensor.distance_mm()
+        RGB = apds9960.prox.proximityLevel
+        if dist > 100:
+            LPWM = 50
+            RPWM = 68
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            RGB = apds9960.prox.proximityLevel
+            while RGB >= 4:
+                motor_left.duty(0)
+                motor_right.duty(0)
+        elif 0 < dist < 90:
+            LPWM = 68
+            RPWM = 50
+            motor_left.duty(LPWM)
+            motor_right.duty(RPWM)
+            dist = ultrasonic_sensor.distance_mm()
+            RGB = apds9960.prox.proximityLevel
+        while RGB >= 4:
+            RGB = apds9960.prox.proximityLevel
+            if RGB >= 4:
+                motor_left.set_backwards()
+                motor_right.set_backwards()
+            else:
+                motor_left.set_forwards()
+                motor_right.set_forwards()
+        if IR_L > IR_R+200 or IR_R > IR_L+200:
+            STATE = 'Home Stretch'
+        if IR_RR > IR_LL+200 or IR_LL > IR_RR+200:
+            STATE = 'Home Stretch'
+        else:
+            STATE = 'Home Stretch'
+    while STATE == 'Home Stretch':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        my_servo1.angle(0)
+        dist = ultrasonic_sensor.distance_mm()
+        if IR_R > IR_L + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 72
+            LPWM = 35
+        elif IR_L > IR_R + 200:
+            motor_left.set_forwards()
+            motor_right.set_forwards()
+            RPWM = 35
+            LPWM = 72
+        elif IR_RR > IR_LL+150:
+            motor_left.set_forwards()
+            motor_right.set_backwards()
+            LPWM = 65
+            RPWM = 65
+        elif IR_LL > IR_RR+150:
+            motor_left.set_backwards()
+            motor_right.set_forwards()
+            LPWM = 65
+            RPWM = 65
+        if 0 < dist < 100:
+            motor_right.duty(0)
+            motor_left.duty(0)
+            enc.clear_count()
+            STATE = 'Dead End before Garage'
+    while STATE == 'Dead End before Garage':
+        IR_LL = IR_SensorLL.read()
+        IR_RR = IR_SensorRR.read()
+        IR_L = IR_SensorL.read()
+        IR_R = IR_SensorR.read()
+        motor_left.set_backwards()
+        motor_right.set_forwards()
+        motor_right.duty(65)
+        motor_left.duty(65)
+        L = enc.get_left()
+        R = enc.get_right()
+        if L >= 11:
+            motor_left.duty(0)
+        if R >= 11:
+            motor_right.duty(0)
+        if L >= 11 and R >= 11:
+            STATE = 'Go Straight'
+            enc.clear_count()
+    while STATE == 'Go Straight':
+        RGB = apds9960.prox.proximityLevel
+        motor_right.duty(RPWM)
+        motor_left.duty(LPWM)
+        L = enc.get_left() - d
+        R = enc.get_right() - c
+        d = enc.get_left()
+        c = enc.get_right()
+        if L <= R:
+            LPWM = 66
+            RPWM = 68
+        if R < L:
+            LPWM = 65
+            RPWM = 69
+        if RGB >= 4:
+            motor_right.duty(0)
+            motor_left.duty(0)
+            enc.clear_count()
+            STATE = 'In Garage 1'
+    while STATE == 'In Garage 1':
+        motor_left.set_backwards()
+        motor_right.set_backwards()
+        motor_right.duty(65)
+        motor_left.duty(65)
+        L = enc.get_left()
+        R = enc.get_right()
+        if L >= 20:
+            motor_left.duty(0)
+        if R >= 20:
+            motor_right.duty(0)
+        if L >= 20 and R >= 20:
+            enc.clear_count()
+            STATE = 'Garage 2'
+    while STATE == 'Garage 2':
+
+        motor_left.set_backwards()
+        motor_right.set_forwards()
+        motor_right.duty(65)
+        motor_left.duty(65)
+        L = enc.get_left()
+        R = enc.get_right()
+        if L >= 22:
+            motor_left.duty(0)
+        if R >= 22:
+            motor_right.duty(0)
+        if L >= 11 and R >= 11:
+            enc.clear_count()
+            STATE = 'Garage 3'
+    while STATE == 'Garage 3':
+        motor_left.set_backwards()
+        motor_right.set_backwards()
+        motor_right.duty(65)
+        motor_left.duty(65)
+        L = enc.get_left()
+        R = enc.get_right()
+        if L >= 20:
+            motor_left.duty(0)
+        if R >= 20:
+            motor_right.duty(0)
+        if L >= 20 and R >= 20:
+            enc.clear_count()
+            STATE = 'END'
